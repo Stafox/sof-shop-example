@@ -1,12 +1,17 @@
 <?php
 
+$nl = php_sapi_name() == 'cli' ? "\n" : "<br>";
+define('NL', $nl);
+
 $user = new User('Bob', 'bob@gmail.com');
 $cart = new Cart();
 $cart->addDiscount(new TenPercentDiscount());
-$product1 = new Product('iPhone', 600);
+$product1 = new Product('iPhone 6', 600);
 $product2 = new Product('iPad', 1000);
+$product3 = new Product('iPhone 6', 600);
 $user->addToCart($cart, $product1);
 $user->addToCart($cart, $product2);
+$user->addToCart($cart, $product3);
 $order = $user->makeOrder($cart);
 $user->getTotalPrice($order);
 
@@ -30,6 +35,11 @@ class Product
     {
         return $this->name;
     }
+
+    public function getOriginalPrice()
+    {
+        return $this->price;
+    }
 }
 
 class User
@@ -41,18 +51,18 @@ class User
     {
         $this->name = $name;
         $this->email = $email;
-        echo "$name logged in to iMarket<br>";
+        echo "$name logged in to iMarket" . NL;
     }
 
     public function addToCart(Cart $c, Product $p)
     {
         $c->addItem($p);
-        echo "{$this->name} added to cart '{$p->getName()}' for \${$p->getPrice()}<br>";
+        echo "{$this->name} added to cart '{$p->getName()}' for \${$p->getPrice()}" . NL;
     }
 
     public function makeOrder(Cart $c)
     {
-        echo "{$this->name} made order<br>";
+        echo "{$this->name} made order" . NL;
 
         return $c->makeOrder();
     }
@@ -60,7 +70,10 @@ class User
     public function getTotalPrice(Order $o)
     {
         $totalPrice = $o->getTotalPrice();
-        echo "{$this->name} chose products for \$$totalPrice<br>";
+        $originalTotalPrice = $o->getOriginalTotalPrice();
+        $discount = $originalTotalPrice - $totalPrice;
+        echo "{$this->name} chose products for \$$totalPrice" . NL;
+        echo "{$this->name} saved \$$discount with discounts" . NL;
     }
 }
 
@@ -83,7 +96,7 @@ class Cart
     public function addDiscount(DiscountDecorator $d)
     {
         $this->discounts[] = $d;
-        echo "Enable '{$d->title}'<br>";
+        echo "Enable '{$d->title}'" . NL;
     }
 
     protected function applyDiscounts()
@@ -117,6 +130,17 @@ class Order
         }
         return $price;
     }
+
+    public function getOriginalTotalPrice()
+    {
+        $price = 0;
+        foreach ($this->items as $group) {
+            foreach($group as $item) {
+                $price += $item->getOriginalPrice();
+            }
+        }
+        return $price;
+    }
 }
 
 abstract class DiscountDecorator extends Product
@@ -131,6 +155,11 @@ abstract class DiscountDecorator extends Product
     {
         $this->product = $p;
         return $this;
+    }
+
+    public function getOriginalPrice()
+    {
+        return $this->product->getOriginalPrice();
     }
 }
 
