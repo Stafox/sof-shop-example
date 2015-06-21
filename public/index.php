@@ -3,17 +3,108 @@
 $nl = php_sapi_name() == 'cli' ? "\n" : "<br>";
 define('NL', $nl);
 
-$user = new User('Bob', 'bob@gmail.com');
-$cart = new Cart();
-$cart->addDiscount(new TenPercentDiscount());
-$product1 = new Product('iPhone 6', 600);
-$product2 = new Product('iPad', 1000);
-$product3 = new Product('iPhone 6', 600);
-$user->addToCart($cart, $product1);
-$user->addToCart($cart, $product2);
-$user->addToCart($cart, $product3);
-$order = $user->makeOrder($cart);
-$user->getTotalPrice($order);
+class ProductCollection
+{
+    protected $items = [];
+
+    public function addItem(Product $p)
+    {
+        $this->items[$p->getName()][] = $p;
+    }
+
+    public function removeItem(Product $p)
+    {
+        foreach ($this->items as $bundleIndex => $bundle) {
+            foreach ($bundle as $itemIndex => $item) {
+                if ($item === $p) {
+                    if (count($bundle) == 1) {
+                        unset($this->items[$bundleIndex]);
+                    } else {
+                        unset($this->items[$bundleIndex][$itemIndex]);
+                    }
+                    break 2;
+                }
+            }
+        }
+    }
+
+    public function getItems()
+    {
+        return $this->items;
+    }
+}
+
+class Cart extends ProductCollection
+{
+
+    public function makeOrder()
+    {
+        return new Order($this->items);
+    }
+
+    public function applyDiscounts($discounts)
+    {
+        foreach ($this->items as &$bundle) {
+            foreach ($bundle as &$item) {
+                foreach ($discounts as $discount) {
+                    $item = clone $discount->applyToProduct($item);
+                }
+            }
+        }
+    }
+
+    public function applyStocks($stocks)
+    {
+        foreach ($stocks as $stock) {
+            $stock->apply($this);
+        }
+    }
+}
+
+class Shop
+{
+    protected $name = 'iMarket';
+    protected $cart = null;
+    protected $discounts = [];
+    protected $stocks = [];
+
+    public function getCart()
+    {
+        if (!$this->cart) {
+            $this->cart = new Cart();
+        }
+        return $this->cart;
+    }
+
+    public function login(User $user)
+    {
+        echo "{$user->name} logged in to {$this->name}" . NL;
+    }
+
+    public function addDiscount(DiscountDecorator $d)
+    {
+        $this->discounts[] = $d;
+        echo "Enable '{$d->title}'" . NL;
+        return $this;
+    }
+
+    public function addStock(StockDecorator $s)
+    {
+        $this->stocks[] = $s;
+        echo "Enable '{$s->title}'" . NL;
+        return $this;
+    }
+
+    public function getDiscounts()
+    {
+        return $this->discounts;
+    }
+
+    public function getStocks()
+    {
+        return $this->stocks;
+    }
+}
 
 class Product
 {
@@ -51,13 +142,18 @@ class User
     {
         $this->name = $name;
         $this->email = $email;
-        echo "$name logged in to iMarket" . NL;
     }
 
     public function addToCart(Cart $c, Product $p)
     {
         $c->addItem($p);
         echo "{$this->name} added to cart '{$p->getName()}' for \${$p->getPrice()}" . NL;
+    }
+
+    public function removeFromCart(Cart $c, Product $p)
+    {
+        $c->removeItem($p);
+        echo "{$this->name} remove from cart '{$p->getName()}' for \${$p->getPrice()}" . NL;
     }
 
     public function makeOrder(Cart $c)
@@ -77,39 +173,6 @@ class User
     }
 }
 
-class Cart
-{
-    public $items = [];
-    public $discounts = [];
-
-    public function addItem(Product $p)
-    {
-        $this->items[$p->getName()][] = $p;
-    }
-
-    public function makeOrder()
-    {
-        $this->applyDiscounts();
-        return new Order($this->items);
-    }
-
-    public function addDiscount(DiscountDecorator $d)
-    {
-        $this->discounts[] = $d;
-        echo "Enable '{$d->title}'" . NL;
-    }
-
-    protected function applyDiscounts()
-    {
-        foreach($this->items as &$group) {
-            foreach($group as &$item) {
-                foreach ($this->discounts as $discount) {
-                    $item = clone $discount->applyToProduct($item);
-                }
-            }
-        }
-    }
-}
 
 class Order
 {
@@ -123,8 +186,8 @@ class Order
     public function getTotalPrice()
     {
         $price = 0;
-        foreach ($this->items as $group) {
-            foreach($group as $item) {
+        foreach ($this->items as $bundle) {
+            foreach ($bundle as $item) {
                 $price += $item->getPrice();
             }
         }
@@ -134,8 +197,8 @@ class Order
     public function getOriginalTotalPrice()
     {
         $price = 0;
-        foreach ($this->items as $group) {
-            foreach($group as $item) {
+        foreach ($this->items as $bundle) {
+            foreach ($bundle as $item) {
                 $price += $item->getOriginalPrice();
             }
         }
@@ -165,10 +228,77 @@ abstract class DiscountDecorator extends Product
 
 class TenPercentDiscount extends DiscountDecorator
 {
-    public $title = 'Ten percent discount';
+    public $title = '10% discount';
 
     public function getPrice()
     {
         return $this->product->getPrice() * 0.9;
     }
 }
+
+
+class FreeDiscount extends DiscountDecorator
+{
+    public $title = 'Get it for Free';
+
+    public function getPrice()
+    {
+        return $this->product->getPrice() * 0;
+    }
+
+}
+
+abstract class StockDecorator
+{
+    protected $collection;
+    protected $discount;
+
+    public function __construct(DiscountDecorator $d)
+    {
+        $this->discount = $d;
+    }
+
+    abstract public function apply(ProductCollection $collection);
+}
+
+class TwoForOneStock extends StockDecorator
+{
+    public $title = 'Two for the price of one';
+
+    public function apply(ProductCollection $collection)
+    {
+        $this->collection = $collection;
+        foreach ($collection->getItems() as &$bundle) {
+            foreach ($bundle as $index => &$item) {
+                if(($index + 1) % 2 == 0) {
+                    $item = clone $this->discount->applyToProduct($item);
+                }
+            }
+        }
+    }
+
+
+}
+
+$shop = new Shop();
+$user = new User('Bob', 'bob@gmail.com');
+$shop->login($user);
+$shop->addDiscount(new TenPercentDiscount())
+    ->addStock(new TwoForOneStock(new FreeDiscount()));
+$cart = $shop->getCart();
+
+$user->addToCart($cart, new Product('iPhone 6', 600));
+$user->addToCart($cart, new Product('iPad', 1000));
+$user->addToCart($cart, new Product('iPad', 1000));
+$user->addToCart($cart, new Product('iPhone 6', 600));
+$user->addToCart($cart, new Product('iPhone 6', 600));
+$product = new Product('iPhone 6S', 1600);
+$user->addToCart($cart, $product);
+$user->removeFromCart($cart, $product);
+
+$discounts = $shop->getDiscounts();
+$stocks = $shop->getStocks();
+$cart->applyDiscounts($discounts);
+$cart->applyStocks($stocks);
+$order = $user->makeOrder($cart);
+$user->getTotalPrice($order);
