@@ -39,7 +39,7 @@ class Cart extends ProductCollection
 
     public function makeOrder()
     {
-        return new Order($this->items);
+        return new Order($this);
     }
 
     public function applyDiscounts($discounts)
@@ -168,25 +168,26 @@ class User
         $totalPrice = $o->getTotalPrice();
         $originalTotalPrice = $o->getOriginalTotalPrice();
         $discount = $originalTotalPrice - $totalPrice;
-        echo "{$this->name} chose products for \$$totalPrice" . NL;
-        echo "{$this->name} saved \$$discount with discounts" . NL;
+        echo "Initial               \$$originalTotalPrice" . NL;
+        echo "Discount             -\$$discount" . NL;
+        echo "Total                 \$$totalPrice" . NL;
     }
 }
 
 
 class Order
 {
-    public $items = [];
+    protected $collection;
 
-    public function __construct($items)
+    public function __construct(ProductCollection $collection)
     {
-        $this->items = $items;
+        $this->collection = $collection;
     }
 
     public function getTotalPrice()
     {
         $price = 0;
-        foreach ($this->items as $bundle) {
+        foreach ($this->collection->getItems() as $bundle) {
             foreach ($bundle as $item) {
                 $price += $item->getPrice();
             }
@@ -197,7 +198,7 @@ class Order
     public function getOriginalTotalPrice()
     {
         $price = 0;
-        foreach ($this->items as $bundle) {
+        foreach ($this->collection->getItems() as $bundle) {
             foreach ($bundle as $item) {
                 $price += $item->getOriginalPrice();
             }
@@ -224,6 +225,21 @@ abstract class DiscountDecorator extends Product
     {
         return $this->product->getOriginalPrice();
     }
+
+    public function getPrice()
+    {
+        return $this->product->getPrice();
+    }
+
+    public function getName()
+    {
+        return $this->product->getName();
+    }
+
+    public function getParent()
+    {
+        return $this->product;
+    }
 }
 
 class TenPercentDiscount extends DiscountDecorator
@@ -236,6 +252,15 @@ class TenPercentDiscount extends DiscountDecorator
     }
 }
 
+class WeekendDiscount extends DiscountDecorator
+{
+    public $title = 'Weekend discount';
+
+    public function getPrice()
+    {
+        return $this->product->getPrice() * 0.98;
+    }
+}
 
 class FreeDiscount extends DiscountDecorator
 {
@@ -276,15 +301,62 @@ class TwoForOneStock extends StockDecorator
             }
         }
     }
+}
 
+class Invoice
+{
+    protected $collection;
+
+    public function __construct(ProductCollection $collection)
+    {
+        $this->collection = $collection;
+    }
+
+    public function show()
+    {
+        $totalOriginalPrice = $totalDiscountPrice = $totalPrice = 0;
+        foreach ($this->collection->getItems() as $bundle) {
+            foreach ($bundle as $item) {
+                $totalDiscount = $item->getOriginalPrice() - $item->getPrice();
+                echo "{$item->getName()} \${$item->getOriginalPrice()} (-\$$totalDiscount)" . NL;
+                foreach($this->getDiscounts($item) as $discount) {
+                    echo "  -\${$discount['price']} ({$discount['title']})" . NL;
+                }
+                echo "Total: \${$item->getPrice()}" . NL;
+                $totalOriginalPrice += $item->getOriginalPrice();
+                $totalDiscountPrice += $totalDiscount;
+                $totalPrice += $item->getPrice();
+            }
+        }
+        echo "============================" . NL;
+        echo "Total original price: \$$totalOriginalPrice" . NL;
+        echo "Total discount: \$$totalDiscountPrice" . NL;
+        echo "Total price: \$$totalPrice" . NL;
+
+    }
+
+    public function getDiscounts(Product $item)
+    {
+        $discounts = [];
+        while($item instanceof DiscountDecorator) {
+            $discounts[] = array(
+                'price' => $item->getParent()->getPrice() - $item->getPrice(),
+                'title' => $item->title
+            );
+            $item = clone $item->getParent();
+        }
+
+        return array_reverse($discounts);
+    }
 
 }
 
 $shop = new Shop();
+$shop->addDiscount(new TenPercentDiscount())
+    ->addDiscount(new WeekendDiscount())
+    ->addStock(new TwoForOneStock(new FreeDiscount()));
 $user = new User('Bob', 'bob@gmail.com');
 $shop->login($user);
-$shop->addDiscount(new TenPercentDiscount())
-    ->addStock(new TwoForOneStock(new FreeDiscount()));
 $cart = $shop->getCart();
 
 $user->addToCart($cart, new Product('iPhone 6', 600));
@@ -300,5 +372,5 @@ $discounts = $shop->getDiscounts();
 $stocks = $shop->getStocks();
 $cart->applyDiscounts($discounts);
 $cart->applyStocks($stocks);
-$order = $user->makeOrder($cart);
-$user->getTotalPrice($order);
+$invoice = new Invoice($cart);
+$invoice->show();
