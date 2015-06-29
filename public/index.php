@@ -32,6 +32,11 @@ class ProductCollection
     {
         return $this->items;
     }
+
+    public function setItems($items)
+    {
+        $this->items = $items;
+    }
 }
 
 class Cart extends ProductCollection
@@ -293,13 +298,15 @@ class TwoForOneStock extends StockDecorator
     public function apply(ProductCollection $collection)
     {
         $this->collection = $collection;
-        foreach ($collection->getItems() as &$bundle) {
+        $items = $collection->getItems();
+        foreach ($items as &$bundle) {
             foreach ($bundle as $index => &$item) {
                 if(($index + 1) % 2 == 0) {
                     $item = clone $this->discount->applyToProduct($item);
                 }
             }
         }
+        $collection->setItems($items);
     }
 }
 
